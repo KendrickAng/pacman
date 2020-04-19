@@ -63,6 +63,77 @@ def closestFood(pos, food, walls):
     # no food found
     return None
 
+def closestGhost(pos, ghosts, walls):
+    """
+    pos: (x, y) of pacman, location to start searching from
+    ghosts: list of AgentState, one for each ghost
+    """
+    # set of (x, y) coords of ghost positions
+    ghost_positions = set([g.getPosition() for g in ghosts])
+    fringe = [(pos[0], pos[1], 0)]
+    expanded = set()
+    while fringe:
+        pos_x, pos_y, dist = fringe.pop(0)
+        curr_coord = (pos_x, pos_y)
+        if curr_coord in expanded:
+            continue
+        expanded.add(curr_coord)
+        # if we find a ghost at this position then exit
+        if curr_coord in ghost_positions:
+            return dist
+        # otherwise spread out from the location to neighbours
+        nbrs = Actions.getLegalNeighbors(curr_coord, walls)
+        for nbr_x, nbr_y in nbrs:
+            fringe.append((nbr_x, nbr_y, dist+1))
+    # no ghost found
+    return None
+
+def longestPathInGrid(walls):
+    """
+    BFS to find the longest path in a grid. Run once at the start of training.
+    """
+    def dfs(start):
+        pathLength = 0
+        visited, stack = set(), [(start[0], start[1], 0)]
+        while stack:
+            pos_x, pos_y, dist = stack.pop()
+            pathLength = max(pathLength, dist)
+            xy = (pos_x, pos_y)
+            if xy not in visited:
+                visited.add(xy)
+                nbrs = Actions.getLegalNeighbors(xy, walls)
+                for nbr_x, nbr_y in nbrs:
+                    stack.append((nbr_x, nbr_y, dist+1))
+        return pathLength
+    # def longestPathFromPos(start):
+    #     fringe = [(start[0], start[1], 0)]
+    #     expanded = set()
+    #     pathLength = 0
+    #     while fringe:
+    #         pos_x, pos_y, dist = fringe.pop(0)
+    #         xy = (pos_x, pos_y)
+    #         pathLength = max(pathLength, dist)
+    #         if xy in expanded:
+    #             continue
+    #         expanded.add(xy)
+    #         nbrs = Actions.getLegalNeighbors(xy, walls)
+    #         for nbr_x, nbr_y in nbrs:
+    #             fringe.append((nbr_x, nbr_y, dist + 1))
+    #     return pathLength
+    # generate all possible starting positions
+    start_positions = []
+    for x in range(walls.width):
+        for y in range(walls.height):
+            # a start position is one without a wall
+            if walls[x][y]:
+                start_positions.append((x, y))
+    path = 0
+    for pos in start_positions:
+        path = max(path, dfs(pos))
+    return path
+
+
+
 class SimpleExtractor(FeatureExtractor):
     """
     Returns simple features for a basic reflex Pacman:
@@ -108,11 +179,20 @@ class NewExtractor(FeatureExtractor):
     """
     # Need some way to have memory
     LAST_ACTION = 'lastAction'
+
+    LONGEST_PATH_LENGTH = None
     history = { LAST_ACTION: None }
 
     def getFeatures(self, state, action):
         "*** YOUR CODE HERE ***"
+        if NewExtractor.LONGEST_PATH_LENGTH is None:
+            NewExtractor.LONGEST_PATH_LENGTH = longestPathInGrid(state.getWalls())
+            print("LONGEST PATH LENGTH IS {0}".format(NewExtractor.LONGEST_PATH_LENGTH))
+
         features = util.Counter()
+        x, y = state.getPacmanPosition()
+        dx, dy = Actions.directionToVector(action)
+        next_pos = (int(x + dx), int(y + dy))
 
         # First feature is always the bias term - 1.0
         features["bias"] = 1.0
@@ -121,10 +201,11 @@ class NewExtractor(FeatureExtractor):
         self.addLastActionFeature(features, action)
 
         # 2. Chase Closest Pill - pacman needs to know closest food to make progress
-        self.addClosestFoodFeature(features, state, action)
+        self.addClosestFoodFeature(features, state, next_pos)
 
         # 3. Avoid Closest Ghost - pacman should know where the closest ghost is to avoid it
-        # self.add
+        self.addClosestGhostFeature(features, state, next_pos)
+        self.addEatFoodFeature(features, state, next_pos)
 
         # update history
         self.setLastAction(action)
@@ -134,16 +215,34 @@ class NewExtractor(FeatureExtractor):
         #print(features)
         return features
 
-    def addClosestFoodFeature(self, features, state, action):
-        x, y = state.getPacmanPosition()
-        dx, dy = Actions.directionToVector(action)
-        next_x, next_y = int(x + dx), int(y + dy)
+    def addEatFoodFeature(self, features, state, next_pos):
+        food = state.getFood()
+        if ("avoid_closest_ghost" not in features) and food[next_pos[0]][next_pos[1]]:
+            features["eats-food"] = 1.0
+
+    def addClosestGhostFeature(self, features, state, next_pos):
+        """
+        :param next_pos: (x, y) next position of pacman after carrying out action
+        """
+        ghostStates, walls = state.getGhostStates(), state.getWalls()
+
+        dist = closestGhost(next_pos, ghostStates, walls)
+        # feature is present when there are ghosts nearby
+        if dist is not None and dist <= 1:
+            # make the feature value less than one otherwise the update will diverge wildly
+            max_path_length = NewExtractor.LONGEST_PATH_LENGTH
+            features["avoid_closest_ghost"] = (max_path_length - float(dist)) / max_path_length
+
+    def addClosestFoodFeature(self, features, state, next_pos):
+        """
+        :param next_pos: (x, y) next position of pacman after carrying out action
+        """
         food, walls = state.getFood(), state.getWalls()
 
-        dist = closestFood((next_x, next_y), food, walls)
+        dist = closestFood(next_pos, food, walls)
         if dist is not None:
             # make the distance a number less than one otherwise the update will diverge wildly
-            max_path_length = walls.width * walls.height
+            max_path_length = NewExtractor.LONGEST_PATH_LENGTH
             features["chase_closest_food"] = (max_path_length - float(dist)) / max_path_length
 
     def addLastActionFeature(self, features, action):
@@ -151,10 +250,8 @@ class NewExtractor(FeatureExtractor):
         Feature value = 1.0 if last action = current action, else 0.0
         """
         lastAction = self.getLastAction()
-        if lastAction is not None:
-            features["follow_last_action"] = 1.0 if lastAction == action else 0.0
-        else:
-            features["follow_last_action"] = 0
+        if lastAction is not None and lastAction == action:
+            features["follow_last_action"] = 1.0
 
     def getLastAction(self):
         return NewExtractor.history[NewExtractor.LAST_ACTION]
