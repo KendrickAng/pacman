@@ -124,7 +124,7 @@ class NewExtractor(FeatureExtractor):
         self.addClosestFoodFeature(features, state, action)
 
         # 3. Avoid Closest Ghost - pacman should know where the closest ghost is to avoid it
-        self.add
+        # self.add
 
         # update history
         self.setLastAction(action)
