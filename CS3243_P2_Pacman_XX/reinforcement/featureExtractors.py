@@ -43,8 +43,8 @@ class CoordinateExtractor(FeatureExtractor):
 
 def closestFood(pos, food, walls):
     """
-    closestFood -- this is similar to the function that we have
-    worked on in the search project; here its all in one place
+    closestFood -- this is similar to the function that we worked on in the search project; here its all in one place
+    Basically BFS to find the closest food, returns distance to closest food, and None if nothing found.
     """
     fringe = [(pos[0], pos[1], 0)]
     expanded = set()
@@ -106,9 +106,59 @@ class NewExtractor(FeatureExtractor):
     """
     Design you own feature extractor here. You may define other helper functions you find necessary.
     """
+    # Need some way to have memory
+    LAST_ACTION = 'lastAction'
+    history = { LAST_ACTION: None }
+
     def getFeatures(self, state, action):
         "*** YOUR CODE HERE ***"
-        pass
+        features = util.Counter()
 
+        # First feature is always the bias term - 1.0
+        features["bias"] = 1.0
 
+        # 1. Follow Last Action - when 2 actions are equally good, continue in the same direction
+        self.addLastActionFeature(features, action)
+
+        # 2. Chase Closest Pill - pacman needs to know closest food to make progress
+        self.addClosestFoodFeature(features, state, action)
+
+        # 3. Avoid Closest Ghost - pacman should know where the closest ghost is to avoid it
+        self.add
+
+        # update history
+        self.setLastAction(action)
+
+        # prevent too wide of divergence while training
+        features.divideAll(10.0)
+        #print(features)
+        return features
+
+    def addClosestFoodFeature(self, features, state, action):
+        x, y = state.getPacmanPosition()
+        dx, dy = Actions.directionToVector(action)
+        next_x, next_y = int(x + dx), int(y + dy)
+        food, walls = state.getFood(), state.getWalls()
+
+        dist = closestFood((next_x, next_y), food, walls)
+        if dist is not None:
+            # make the distance a number less than one otherwise the update will diverge wildly
+            max_path_length = walls.width * walls.height
+            features["chase_closest_food"] = (max_path_length - float(dist)) / max_path_length
+
+    def addLastActionFeature(self, features, action):
+        """
+        Feature value = 1.0 if last action = current action, else 0.0
+        """
+        lastAction = self.getLastAction()
+        if lastAction is not None:
+            features["follow_last_action"] = 1.0 if lastAction == action else 0.0
+        else:
+            features["follow_last_action"] = 0
+
+    def getLastAction(self):
+        return NewExtractor.history[NewExtractor.LAST_ACTION]
+
+    def setLastAction(self, action):
+        NewExtractor.history[NewExtractor.LAST_ACTION] = action
         

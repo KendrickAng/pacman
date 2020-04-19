@@ -214,8 +214,10 @@ class QLearningAgent(ReinforcementAgent):
         q_predict = self.getQValue(state, action)
         q_target = reward + self.discount * self.getValue(nextState)
         if self.isTerminalState(nextState):
+            # no next state to get value from
             q_target = reward
 
+        # alpha = learning rate
         self.getStateCDictAfterCheck(state).incrementAll([action], self.alpha * (q_target - q_predict))
 
     def getPolicy(self, state):
@@ -285,14 +287,28 @@ class ApproximateQAgent(PacmanQAgent):
           where * is the dotProduct operator
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        # util.raiseNotDefined()
+        featureVector = self.featExtractor.getFeatures(state, action)
+        qEstimate = 0
+        # for the identify extractor, the weight is simply the q value itself.
+        for feature, featureVal in featureVector.items():
+            weight = self.weights[feature]
+            qEstimate += weight * featureVal
+        return qEstimate
 
     def update(self, state, action, nextState, reward):
         """
            Should update your weights based on transition
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        # util.raiseNotDefined()
+        r, gamma, alpha = reward, self.discount, self.alpha
+        difference = (r + gamma * self.getValue(nextState)) - self.getQValue(state, action)
+
+        # in the case of identity extractor, weight update = q value update
+        featureVector = self.featExtractor.getFeatures(state, action)
+        for feature, featureVal in featureVector.items():
+            self.weights[feature] += alpha * difference * featureVal
 
     def final(self, state):
         "Called at the end of each game."
